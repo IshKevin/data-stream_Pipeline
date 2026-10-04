@@ -124,6 +124,9 @@ def test_database_url_is_assembled_from_parts_with_escaping(monkeypatch):
     from app.config import build_database_url
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv(
+        "POSTGRES_PORT", raising=False
+    )  # don't depend on the surrounding environment
     monkeypatch.setenv("POSTGRES_USER", "desk")
     monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss/w:rd#1%2f?x&y")
     monkeypatch.setenv("POSTGRES_HOST", "db")
@@ -158,6 +161,7 @@ def test_empty_postgres_variables_fall_back_to_defaults(monkeypatch):
     from app.config import build_database_url
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_PORT", raising=False)
     for name in ("POSTGRES_USER", "POSTGRES_DB", "POSTGRES_HOST"):
         monkeypatch.setenv(name, "")
     monkeypatch.setenv("POSTGRES_PASSWORD", "secret")

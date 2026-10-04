@@ -35,6 +35,14 @@ import: ## Import a CSV:  make import FILE=seed/episodes.csv
 test: .env ## Run the API test-suite in Docker (separate <db>_test database on the compose Postgres)
 	$(COMPOSE) --profile test run --rm --build tests
 
+ci: .env ## Run what GitHub CI runs (lint, types, tests, build, compose check) on this machine
+	$(COMPOSE) config --quiet
+	$(COMPOSE) up -d --wait db
+	cd api && uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy app \
+	  && POSTGRES_HOST=localhost POSTGRES_PORT=$(or $(DB_PORT),5434) uv run pytest
+	cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build
+	@echo "CI steps passed locally."
+
 lint: ## Lint + type-check the API and type-check the web app
 	cd api && uv run ruff check . && uv run ruff format --check . && uv run mypy app
 	cd web && npm run lint && npm run typecheck
@@ -42,4 +50,4 @@ lint: ## Lint + type-check the API and type-check the web app
 fmt: ## Auto-format the API
 	cd api && uv run ruff check --fix . && uv run ruff format .
 
-.PHONY: help up dev down reset logs migrate import test lint fmt
+.PHONY: help ci up dev down reset logs migrate import test lint fmt
