@@ -10,6 +10,8 @@ interface AuthState {
   logout: () => void
 }
 
+export const SESSION_EXPIRED_KEY = 'data-stream_pipeline.expired'
+
 const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -24,7 +26,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient])
 
   useEffect(() => {
-    setUnauthorizedHandler(logout)
+    // A 401 on an authenticated call means the session expired (or the account was deactivated).
+    setUnauthorizedHandler(() => {
+      try {
+        sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+      } catch {
+        /* storage unavailable */
+      }
+      logout()
+    })
   }, [logout])
 
   useEffect(() => {

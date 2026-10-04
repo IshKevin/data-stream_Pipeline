@@ -1,5 +1,5 @@
 [project]
-name = "data-stream-pipeline-api"
+name = "data-stream_pipeline"
 version = "0.1.0"
 description = "data-stream_Pipeline - internal platform API"
 requires-python = ">=3.14"

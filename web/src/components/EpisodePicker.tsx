@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ErrorBanner, Empty, Loading } from './ui'
+import { Icon } from './Icon'
+import { useToast } from './Toast'
+import { Empty, ErrorBanner, Pagination, SkeletonRows } from './ui'
 import { api } from '../lib/api'
 import { formatDateTime, formatDuration } from '../lib/format'
 import type { Episode, Page, Quality, RequestDetail } from '../lib/types'
@@ -10,6 +12,7 @@ const PAGE_SIZE = 20
 /** Operator tool: browse unassigned episodes (filter by task / quality) and assign them to a request. */
 export function EpisodePicker({ request }: { request: RequestDetail }) {
   const queryClient = useQueryClient()
+  const toast = useToast()
   const [task, setTask] = useState(request.task_name)
   const [quality, setQuality] = useState<Quality | ''>('')
   const [offset, setOffset] = useState(0)
@@ -32,7 +35,8 @@ export function EpisodePicker({ request }: { request: RequestDetail }) {
   const assign = useMutation({
     mutationFn: (ids: number[]) =>
       api<RequestDetail>(`/requests/${request.id}/assignments`, { method: 'POST', body: { episode_ids: ids } }),
-    onSuccess: () => {
+    onSuccess: (_data, ids) => {
+      toast.success(`${ids.length} episode${ids.length === 1 ? '' : 's'} assigned.`)
       setSelected(new Set())
       void queryClient.invalidateQueries({ queryKey: ['request', request.id] })
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
@@ -42,6 +46,8 @@ export function EpisodePicker({ request }: { request: RequestDetail }) {
 
   const page = episodes.data
   const selectable = (e: Episode) => e.quality !== 'bad'
+  const selectableOnPage = page?.items.filter(selectable) ?? []
+  const allOnPageSelected = selectableOnPage.length > 0 && selectableOnPage.every((e) => selected.has(e.id))
   const needed = Math.max(0, request.episodes_requested - request.assigned_count)
 
   function toggle(id: number) {
@@ -53,22 +59,31 @@ export function EpisodePicker({ request }: { request: RequestDetail }) {
     })
   }
 
-  function selectPage() {
-    if (!page) return
-    setSelected(new Set([...selected, ...page.items.filter(selectable).map((e) => e.id)]))
+  function togglePage() {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const e of selectableOnPage) {
+        if (allOnPageSelected) next.delete(e.id)
+        else next.add(e.id)
+      }
+      return next
+    })
   }
 
   return (
-    <section className="card">
+    <section className="card" aria-labelledby="picker-title">
       <div className="page-head">
-        <h3>Assign episodes</h3>
-        <span className="muted">
+        <h2 id="picker-title" className="title-icon">
+          <Icon name="link" size={20} />
+          Assign episodes
+        </h2>
+        <span className="muted" role="status">
           {needed > 0 ? `${needed} more needed to deliver` : 'Enough episodes assigned'}
         </span>
       </div>
 
       <div className="filters">
-        <label>
+        <label className="field">
           Task
           <select
             value={task}
@@ -85,7 +100,7 @@ export function EpisodePicker({ request }: { request: RequestDetail }) {
             ))}
           </select>
         </label>
-        <label>
+        <label className="field">
           Quality
           <select
             value={quality}
@@ -103,70 +118,87 @@ export function EpisodePicker({ request }: { request: RequestDetail }) {
       </div>
 
       <ErrorBanner error={assign.error} />
-      {episodes.isLoading && <Loading what="Loading episodes" />}
       <ErrorBanner error={episodes.error} />
-      {page && page.items.length === 0 && <Empty>No unassigned episodes match these filters.</Empty>}
-      {page && page.items.length > 0 && (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th />
-                <th>Episode</th>
-                <th>Task</th>
-                <th>Robot</th>
-                <th>Recorded</th>
-                <th>Length</th>
-                <th>Quality</th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.items.map((e) => (
-                <tr key={e.id} className={selectable(e) ? '' : 'row-disabled'}>
-                  <td>
+      <div className="card-flush" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)' }} aria-busy={episodes.isFetching}>
+        {episodes.isLoading && <SkeletonRows rows={5} label="Loading episodes" />}
+        {page && page.items.length === 0 && (
+          <Empty title="No unassigned episodes match">Try another task or quality.</Empty>
+        )}
+        {page && page.items.length > 0 && (
+          <div className="table-wrap">
+            <table aria-label="Unassigned episodes" className="table-stack">
+              <thead>
+                <tr>
+                  <th scope="col">
                     <input
                       type="checkbox"
-                      aria-label={`Select ${e.episode_id}`}
-                      disabled={!selectable(e)}
-                      checked={selected.has(e.id)}
-                      onChange={() => toggle(e.id)}
+                      aria-label="Select all assignable episodes on this page"
+                      checked={allOnPageSelected}
+                      disabled={selectableOnPage.length === 0}
+                      onChange={togglePage}
                     />
-                  </td>
-                  <td>{e.episode_id}</td>
-                  <td>{e.task_name}</td>
-                  <td>{e.robot_id}</td>
-                  <td>{formatDateTime(e.recorded_at)}</td>
-                  <td>{formatDuration(e.duration_seconds)}</td>
-                  <td>
-                    <span className={`quality quality-${e.quality}`}>{e.quality}</span>
-                  </td>
+                  </th>
+                  <th scope="col">Episode</th>
+                  <th scope="col">Task</th>
+                  <th scope="col" className="hide-sm">
+                    Robot
+                  </th>
+                  <th scope="col" className="hide-sm">
+                    Recorded
+                  </th>
+                  <th scope="col">Length</th>
+                  <th scope="col">Quality</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {page.items.map((e) => (
+                  <tr key={e.id} className={selectable(e) ? '' : 'row-disabled'}>
+                    <td data-label="Select">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${e.episode_id}`}
+                        disabled={!selectable(e)}
+                        checked={selected.has(e.id)}
+                        onChange={() => toggle(e.id)}
+                      />
+                    </td>
+                    <td data-label="Episode">{e.episode_id}</td>
+                    <td data-label="Task">{e.task_name}</td>
+                    <td className="hide-sm" data-label="Robot">
+                      {e.robot_id}
+                    </td>
+                    <td className="hide-sm" data-label="Recorded">
+                      {formatDateTime(e.recorded_at)}
+                    </td>
+                    <td data-label="Length">{formatDuration(e.duration_seconds)}</td>
+                    <td data-label="Quality">
+                      <span className={`quality quality-${e.quality}`}>{e.quality}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {page && <Pagination offset={offset} pageSize={PAGE_SIZE} total={page.total} onChange={setOffset} />}
+      </div>
+
+      {selected.size > 0 && (
+        <div className="sticky-bar" role="region" aria-label="Selection">
+          <span>
+            <strong>{selected.size}</strong> selected
+          </span>
+          <span className="spacer" />
+          <button className="btn" onClick={() => setSelected(new Set())} disabled={assign.isPending}>
+            <Icon name="close" size={16} />
+            Clear
+          </button>
+          <button className="btn btn-primary" disabled={assign.isPending} onClick={() => assign.mutate([...selected])}>
+            <Icon name="link" size={16} />
+            {assign.isPending ? 'Assigning…' : `Assign selected (${selected.size})`}
+          </button>
         </div>
       )}
-
-      <div className="pager">
-        <button className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-          Previous
-        </button>
-        <span>{page ? `${page.total === 0 ? 0 : offset + 1}–${Math.min(offset + PAGE_SIZE, page.total)} of ${page.total}` : ''}</span>
-        <button className="btn" disabled={!page || offset + PAGE_SIZE >= page.total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-          Next
-        </button>
-        <span className="spacer" />
-        <button className="btn" onClick={selectPage} disabled={!page}>
-          Select page
-        </button>
-        <button
-          className="btn btn-primary"
-          disabled={selected.size === 0 || assign.isPending}
-          onClick={() => assign.mutate([...selected])}
-        >
-          {assign.isPending ? 'Assigning…' : `Assign selected (${selected.size})`}
-        </button>
-      </div>
     </section>
   )
 }

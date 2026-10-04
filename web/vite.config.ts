@@ -8,6 +8,10 @@ const apiTarget = process.env.VITE_API_PROXY ?? 'http://localhost:8000'
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    target: 'es2022',
+    sourcemap: false, // don't ship source maps to production
+  },
   server: {
     port: 5173,
     proxy: {
@@ -15,5 +19,9 @@ export default defineConfig({
       '/health': apiTarget,
     },
   },
-  test: { environment: 'node', include: ['src/**/*.test.ts'] },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    setupFiles: ['./src/test/setup.ts'],
+  },
 })

@@ -12,7 +12,7 @@ COPY package.json package-lock.json ./
 # Cache mounts are shared by *id* across every build on the Docker host, so give ours its own id (a corrupted or
 # incompatible npm cache left by another app on the same server cannot break this build). If npm fails, print
 # the architecture, disk, memory and npm's error lines so the real reason shows up in the deploy log.
-RUN --mount=type=cache,id=data-stream-npm,target=/root/.npm,sharing=locked \
+RUN --mount=type=cache,id=data-stream_pipeline-npm,target=/root/.npm,sharing=locked \
     npm ci --no-fund --no-audit \
  || { echo "=== npm ci FAILED ==="; echo "arch: $(uname -m)"; df -h / /root/.npm; free -m; \
       grep -hE " (error|verbose stack) | http fetch " /root/.npm/_logs/*-debug-*.log | tail -n 40; exit 1; }
@@ -20,7 +20,7 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.30-alpine AS runtime
-COPY --link security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY --link security-headers.conf proxy-api.conf /etc/nginx/snippets/
 COPY --link nginx.conf /etc/nginx/conf.d/default.conf
 COPY --link --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
