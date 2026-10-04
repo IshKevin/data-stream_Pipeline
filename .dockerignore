@@ -11,4 +11,3 @@ web
 **/.ruff_cache
 **/.mypy_cache
 **/dist
-COMMIT_PLAN.md

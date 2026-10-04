@@ -69,10 +69,12 @@ jobs:
     needs: [api, web]
     steps:
       - uses: actions/checkout@v7
-      - name: Create .env
+      - name: Create .env (like a Coolify deployment - no fixed host ports)
         run: |
           cp .env.example .env
           sed -i "s/^JWT_SECRET=.*/JWT_SECRET=ci-smoke-secret-ci-smoke-secret-ci-smoke/" .env
+          # A server deployment sets no WEB_PORT/API_PORT/DB_PORT: Docker then publishes random free loopback ports.
+          sed -i '/^\(WEB\|API\|DB\)_PORT=/d' .env
       - name: Validate the compose file
         run: docker compose config --quiet
       - name: Bring the whole system up from a clean clone
@@ -80,11 +82,13 @@ jobs:
       - name: Smoke test through the web container
         run: |
           set -e
-          curl -fsS http://localhost:8080/health
-          curl -fsS http://localhost:8080/ready
-          TOKEN=$(curl -fsS -X POST http://localhost:8080/api/auth/login \
+          WEB="http://$(docker compose port web 80)"
+          echo "web is on $WEB"
+          curl -fsS "$WEB/health"
+          curl -fsS "$WEB/ready"
+          TOKEN=$(curl -fsS -X POST "$WEB/api/auth/login" \
             -H 'content-type: application/json' \
             -d '{"email":"ops1@example.com","password":"ops123"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
-          curl -fsS -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/episodes?limit=1" | grep -q '"total"'
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$WEB/api/episodes?limit=1" | grep -q '"total"'
       - if: failure()
         run: docker compose logs --no-color

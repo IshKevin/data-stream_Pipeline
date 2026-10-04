@@ -1,5 +1,6 @@
 """Operational commands:  python -m app.cli <command>
 
+wait-db [--timeout SECONDS]  block until the database accepts connections (prints the real error if it never does)
 seed-users [--file PATH]     create the users listed in a JSON file (existing emails are skipped)
 import-episodes PATH         import an episode CSV (safe to repeat)
 """
