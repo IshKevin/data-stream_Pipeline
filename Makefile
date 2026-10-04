@@ -14,6 +14,9 @@ up: .env ## Build and start everything (db, migrations, seed, api, web)
 	$(COMPOSE) up --build -d
 	@echo "Web: http://localhost:$(or $(WEB_PORT),8080)   API docs: http://localhost:$(or $(API_PORT),8000)/api/docs"
 
+dev: .env ## Dev mode: rebuild + restart the API on code changes (docker compose watch)
+	$(COMPOSE) up --build --watch
+
 down: ## Stop the stack (keeps the database volume)
 	$(COMPOSE) down
 
@@ -39,4 +42,4 @@ lint: ## Lint + type-check the API and type-check the web app
 fmt: ## Auto-format the API
 	cd api && uv run ruff check --fix . && uv run ruff format .
 
-.PHONY: help up down reset logs migrate import test lint fmt
+.PHONY: help up dev down reset logs migrate import test lint fmt

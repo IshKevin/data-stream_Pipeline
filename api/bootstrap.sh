@@ -13,6 +13,8 @@ if [ -z "${DATABASE_URL:-}" ]; then
   echo "==> database: ${POSTGRES_USER:-desk}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-desk}"
 fi
 
+python -m app.cli wait-db --timeout "${DB_WAIT_SECONDS:-60}"
+
 echo "==> applying migrations"
 alembic upgrade head
 

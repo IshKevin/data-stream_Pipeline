@@ -7,15 +7,44 @@ import-episodes PATH         import an episode CSV (safe to repeat)
 import argparse
 import json
 import sys
+import time
 
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.engine import make_url
 
-from app.config import get_settings
+from app.config import build_database_url, get_settings
 from app.db import session_factory
 from app.logging_config import configure_logging
 from app.models import User
 from app.security import hash_password
 from app.services.importer import FatalImportError, import_episodes
+
+
+def wait_for_db(timeout: float) -> int:
+    """Retry until the database answers. Postgres can report "ready" on its socket while the TCP
+    listener is still coming up (first start on an empty volume), so a one-shot connect is flaky."""
+    url = make_url(build_database_url())
+    target = f"{url.username}@{url.host}:{url.port}/{url.database}"
+    engine = create_engine(url, connect_args={"connect_timeout": 3})
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print(f"database ready: {target} (attempt {attempt})")
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            reason = str(exc).strip().splitlines()[0][:300] if str(exc).strip() else repr(exc)
+            if time.monotonic() >= deadline:
+                print(
+                    f"ERROR: database not reachable at {target} after {timeout:.0f}s: {reason}",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"waiting for database {target}: {reason}")
+            time.sleep(2)
 
 
 def seed_users(path: str) -> int:
@@ -63,12 +92,16 @@ def import_file(path: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
+    p_wait = sub.add_parser("wait-db")
+    p_wait.add_argument("--timeout", type=float, default=60)
     p_seed = sub.add_parser("seed-users")
     p_seed.add_argument("--file", default="/seed/users.json")
     p_imp = sub.add_parser("import-episodes")
     p_imp.add_argument("path")
     args = parser.parse_args(argv)
 
+    if args.command == "wait-db":  # needs nothing but the database settings
+        return wait_for_db(args.timeout)
     configure_logging(get_settings().log_level)
     if args.command == "seed-users":
         return seed_users(args.file)

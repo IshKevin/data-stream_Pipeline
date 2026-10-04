@@ -14,13 +14,17 @@ def build_database_url() -> str:
     explicit = os.environ.get("DATABASE_URL")
     if explicit:
         return explicit
+
+    def env(name: str, default: str) -> str:
+        return os.environ.get(name) or default  # an empty value counts as "not set"
+
     return URL.create(
         "postgresql+psycopg",
-        username=os.environ.get("POSTGRES_USER", "desk"),
-        password=os.environ.get("POSTGRES_PASSWORD", "desk"),
-        host=os.environ.get("POSTGRES_HOST", "localhost"),
-        port=int(os.environ.get("POSTGRES_PORT", "5432")),
-        database=os.environ.get("POSTGRES_DB", "desk"),
+        username=env("POSTGRES_USER", "desk"),
+        password=env("POSTGRES_PASSWORD", "desk"),
+        host=env("POSTGRES_HOST", "localhost"),
+        port=int(env("POSTGRES_PORT", "5432")),
+        database=env("POSTGRES_DB", "desk"),
     ).render_as_string(hide_password=False)
 
 

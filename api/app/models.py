@@ -72,7 +72,7 @@ class Episode(Base):
     quality: Mapped[str] = mapped_column(String(10))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    assignment: Mapped["Assignment | None"] = relationship(back_populates="episode", uselist=False)
+    assignment: Mapped[Assignment | None] = relationship(back_populates="episode", uselist=False)
 
 
 class Request(Base):
@@ -97,10 +97,10 @@ class Request(Base):
     )
 
     client: Mapped[User] = relationship()
-    history: Mapped[list["RequestStatusHistory"]] = relationship(
+    history: Mapped[list[RequestStatusHistory]] = relationship(
         back_populates="request", order_by="RequestStatusHistory.id"
     )
-    assignments: Mapped[list["Assignment"]] = relationship(
+    assignments: Mapped[list[Assignment]] = relationship(
         back_populates="request", order_by="Assignment.id"
     )
 
