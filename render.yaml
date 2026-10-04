@@ -1,0 +1,30 @@
+# Render Blueprint: dashboard -> New -> Blueprint -> pick this repository.
+# One web service (API + built web app in a single container) and one PostgreSQL database.
+databases:
+  - name: data-stream-db
+    databaseName: desk
+    user: desk
+    plan: free            # free Postgres is deleted after 30 days; use a paid plan for anything lasting
+
+services:
+  - type: web
+    name: data-stream-pipeline
+    runtime: docker
+    plan: free            # free web services sleep after 15 min idle (first request is slow)
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: data-stream-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true          # random, stored by Render, never in the repo
+      - key: LOG_LEVEL
+        value: INFO
+      # Creates the demo accounts from seed/users.json (weak, documented passwords) and imports the
+      # sample episodes. Set to "false" - and create real users - for anything beyond a demo.
+      - key: SEED_DEMO_DATA
+        value: "true"
