@@ -247,7 +247,7 @@ wheels = [
 ]
 
 [[package]]
-name = "data-stream-pipeline-api"
+name = "data-stream-pipeline"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

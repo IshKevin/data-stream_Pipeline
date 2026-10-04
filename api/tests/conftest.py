@@ -18,7 +18,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-test-secret-test-secret-0123456
 from app.config import build_database_url  # noqa: E402  (import-light: no settings needed)
 
 _server_url = make_url(os.environ.get("TEST_DATABASE_URL") or build_database_url())
-_db_name = _server_url.database or "desk"
+_db_name = _server_url.database or "data-stream_pipeline"
 if not _db_name.endswith("_test"):
     _db_name += "_test"
 _test_url = _server_url.set(database=_db_name)

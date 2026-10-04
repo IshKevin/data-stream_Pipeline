@@ -36,8 +36,8 @@ await client.fill('input[type=number]', '2')
 await client.fill('input[type=date]', '2027-03-01')
 await client.fill('textarea', 'UI test request')
 await client.click('button:has-text("Submit request")')
-await client.waitForSelector('h2:has-text("Request #")')
-const title = await client.locator('h2:has-text("Request #")').innerText()
+await client.waitForSelector('h1:has-text("Request #")')
+const title = await client.locator('h1:has-text("Request #")').innerText()
 const id = title.match(/#(\d+)/)[1]
 log(`client created ${title.trim()}`)
 
@@ -86,7 +86,7 @@ log('history: ' + hist.map((h) => h.split('\n')[0]).reverse().join(' | '))
 
 // operator pages
 await ops.click('nav a:has-text("Analytics")')
-await ops.waitForSelector('text=Median time from submitted to delivered')
+await ops.waitForSelector('text=Request fulfilment')
 log('analytics page renders')
 await ops.click('nav a:has-text("Import")')
 await ops.setInputFiles('input[type=file]', new URL('../../seed/episodes.csv', import.meta.url).pathname)
@@ -108,7 +108,7 @@ log("other client gets 'Request not found' for someone else's request")
 // admin users page
 const admin = await login('admin@example.com', 'admin123')
 await admin.click('nav a:has-text("Users")')
-await admin.waitForSelector('text=Add a user')
+await admin.waitForSelector('button:has-text("Add user")')
 log('admin users page renders')
 
 

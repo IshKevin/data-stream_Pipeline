@@ -10,7 +10,7 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 [ "${#JWT_SECRET}" -ge 32 ] || fail "JWT_SECRET is too short: ${#JWT_SECRET} characters, need at least 32"
 if [ -z "${DATABASE_URL:-}" ]; then
   [ -n "${POSTGRES_PASSWORD:-}" ] || fail "POSTGRES_PASSWORD is not set"
-  echo "==> database: ${POSTGRES_USER:-desk}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-desk}"
+  echo "==> database: ${POSTGRES_USER:-data-stream_pipeline}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-data-stream_pipeline}"
 fi
 
 python -m app.cli wait-db --timeout "${DB_WAIT_SECONDS:-60}"

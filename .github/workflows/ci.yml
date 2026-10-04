@@ -17,17 +17,17 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: desk
-          POSTGRES_PASSWORD: desk
-          POSTGRES_DB: desk
+          POSTGRES_USER: data-stream_pipeline
+          POSTGRES_PASSWORD: ci-password
+          POSTGRES_DB: data-stream_pipeline
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U desk"
+          --health-cmd "pg_isready -U data-stream_pipeline"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql+psycopg://desk:desk@localhost:5432/desk
+      DATABASE_URL: postgresql+psycopg://data-stream_pipeline:ci-password@localhost:5432/data-stream_pipeline
       JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
     defaults:
       run:

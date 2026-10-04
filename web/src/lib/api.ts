@@ -1,4 +1,4 @@
-const TOKEN_KEY = 'drd.token'
+const TOKEN_KEY = 'data-stream_pipeline.token'
 
 export function getToken(): string | null {
   try {
@@ -57,6 +57,15 @@ function messageFrom(body: unknown, fallback: string): string {
   return fallback
 }
 
+/** Messages for failures that don't come with a JSON body (proxy errors, rate limiting, size limits). */
+export function friendlyStatusMessage(status: number): string {
+  if (status === 413) return 'That file is too large to upload.'
+  if (status === 429) return 'Too many attempts. Please wait a moment and try again.'
+  if (status === 502 || status === 503 || status === 504) return 'The service is temporarily unavailable. Please try again in a moment.'
+  if (status >= 500) return 'The server had a problem. Please try again.'
+  return `Request failed (${status})`
+}
+
 export async function api<T>(
   path: string,
   options: { method?: string; body?: unknown; form?: FormData; query?: Record<string, string | number | undefined | null> } = {},
@@ -93,7 +102,7 @@ export async function api<T>(
   if (!res.ok) {
     if (res.status === 401 && token) onUnauthorized()
     const j = json as { code?: string; errors?: ApiErrorDetail[] } | null
-    throw new ApiError(res.status, messageFrom(json, `Request failed (${res.status})`), j?.code, j?.errors)
+    throw new ApiError(res.status, messageFrom(json, friendlyStatusMessage(res.status)), j?.code, j?.errors)
   }
   return json as T
 }

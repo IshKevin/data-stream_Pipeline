@@ -127,12 +127,17 @@ def test_database_url_is_assembled_from_parts_with_escaping(monkeypatch):
     monkeypatch.delenv(
         "POSTGRES_PORT", raising=False
     )  # don't depend on the surrounding environment
-    monkeypatch.setenv("POSTGRES_USER", "desk")
+    monkeypatch.setenv("POSTGRES_USER", "data-stream_pipeline")
     monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss/w:rd#1%2f?x&y")
     monkeypatch.setenv("POSTGRES_HOST", "db")
     monkeypatch.setenv("POSTGRES_DB", "pipeline")
     url = make_url(build_database_url())
-    assert (url.host, url.port, url.username, url.database) == ("db", 5432, "desk", "pipeline")
+    assert (url.host, url.port, url.username, url.database) == (
+        "db",
+        5432,
+        "data-stream_pipeline",
+        "pipeline",
+    )
     assert url.password == "p@ss/w:rd#1%2f?x&y"
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://explicit@host/db")
@@ -146,11 +151,14 @@ def test_wait_for_db_succeeds_when_up_and_reports_the_reason_when_not(monkeypatc
     assert "database ready" in capsys.readouterr().out
 
     monkeypatch.setenv(
-        "DATABASE_URL", "postgresql+psycopg://desk:x@127.0.0.1:1/desk"
+        "DATABASE_URL",
+        "postgresql+psycopg://data-stream_pipeline:x@127.0.0.1:1/data-stream_pipeline",
     )  # nothing listens on :1
     assert wait_for_db(timeout=1) == 1
     err = capsys.readouterr().err
-    assert err.startswith("ERROR: database not reachable at desk@127.0.0.1:1/desk")
+    assert err.startswith(
+        "ERROR: database not reachable at data-stream_pipeline@127.0.0.1:1/data-stream_pipeline"
+    )
     assert "x@" not in err  # the password never reaches the logs
 
 
@@ -166,4 +174,8 @@ def test_empty_postgres_variables_fall_back_to_defaults(monkeypatch):
         monkeypatch.setenv(name, "")
     monkeypatch.setenv("POSTGRES_PASSWORD", "secret")
     url = make_url(build_database_url())
-    assert (url.username, url.database, url.host) == ("desk", "desk", "localhost")
+    assert (url.username, url.database, url.host) == (
+        "data-stream_pipeline",
+        "data-stream_pipeline",
+        "localhost",
+    )

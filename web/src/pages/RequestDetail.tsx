@@ -1,20 +1,43 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { EpisodePicker } from '../components/EpisodePicker'
-import { Empty, ErrorBanner, Loading, Progress, StatusBadge } from '../components/ui'
 import { isStaff, useAuth } from '../auth'
+import { ConfirmDialog } from '../components/Dialog'
+import { EpisodePicker } from '../components/EpisodePicker'
+import { Icon, type IconName } from '../components/Icon'
+import { StatusStepper } from '../components/StatusStepper'
+import { useToast } from '../components/Toast'
+import { Empty, ErrorBanner, Progress, SkeletonRows, StatusBadge } from '../components/ui'
 import { api, ApiError } from '../lib/api'
 import { formatDate, formatDateTime, formatDuration, STATUS_LABEL, TRANSITION_LABEL } from '../lib/format'
-import type { RequestDetail as Detail, Status } from '../lib/types'
+import { useDocumentTitle } from '../lib/hooks'
+import type { Episode, RequestDetail as Detail, Status } from '../lib/types'
+
+const ACTION_ICON: Record<Status, IconName> = {
+  submitted: 'send',
+  in_progress: 'play',
+  delivered: 'package',
+  accepted: 'check-circle',
+  rejected: 'x-circle',
+}
+
+const DONE_MESSAGE: Partial<Record<Status, string>> = {
+  in_progress: 'Work started.',
+  delivered: 'Marked as delivered – the client can now review it.',
+  accepted: 'Delivery accepted. Thank you!',
+  rejected: 'Delivery rejected and sent back for rework.',
+}
 
 export function RequestDetail() {
   const { id } = useParams()
   const requestId = Number(id)
   const { user } = useAuth()
   const queryClient = useQueryClient()
+  const toast = useToast()
   const [rejecting, setRejecting] = useState(false)
   const [note, setNote] = useState('')
+  const [removing, setRemoving] = useState<Episode | null>(null)
+  useDocumentTitle(`Request #${Number.isInteger(requestId) ? requestId : ''}`)
 
   const query = useQuery({
     queryKey: ['request', requestId],
@@ -31,29 +54,47 @@ export function RequestDetail() {
   const transition = useMutation({
     mutationFn: (vars: { to: Status; note?: string }) =>
       api<Detail>(`/requests/${requestId}/transition`, { method: 'POST', body: { to: vars.to, note: vars.note || null } }),
-    onSuccess: (data) => {
+    onSuccess: (data, vars) => {
       queryClient.setQueryData(['request', requestId], data)
       setRejecting(false)
       setNote('')
+      toast.success(DONE_MESSAGE[vars.to] ?? 'Status updated.')
       refresh()
     },
+    onError: (err) => toast.error(err.message),
   })
 
   const unassign = useMutation({
     mutationFn: (episodePk: number) =>
       api<void>(`/requests/${requestId}/assignments/${episodePk}`, { method: 'DELETE' }),
     onSuccess: () => {
+      setRemoving(null)
+      toast.success('Episode removed from this request.')
       refresh()
       void queryClient.invalidateQueries({ queryKey: ['episodes'] })
     },
+    onError: (err) => {
+      setRemoving(null)
+      toast.error(err.message)
+    },
   })
 
-  if (query.isLoading) return <Loading what="Loading request" />
+  if (query.isLoading) {
+    return (
+      <div className="card" style={{ padding: 0 }}>
+        <SkeletonRows rows={7} label="Loading request" />
+      </div>
+    )
+  }
   if (query.error instanceof ApiError && query.error.status === 404) {
     return (
-      <div className="card">
-        <h2>Request not found</h2>
-        <Link to="/requests">Back to requests</Link>
+      <div className="card not-found">
+        <h1>Request not found</h1>
+        <p className="muted">It may not exist, or it belongs to another client.</p>
+        <Link className="btn btn-primary" to="/requests">
+          <Icon name="arrow-left" size={16} />
+          Back to requests
+        </Link>
       </div>
     )
   }
@@ -66,35 +107,52 @@ export function RequestDetail() {
 
   return (
     <>
-      <p>
-        <Link to="/requests">← All requests</Link>
-      </p>
+      <Link className="back-link" to="/requests">
+        <Icon name="arrow-left" size={16} />
+        All requests
+      </Link>
 
-      <section className="card">
+      <section className="card" aria-labelledby="request-title">
         <div className="page-head">
-          <h2>
+          <h1 id="request-title">
             Request #{r.id} <StatusBadge status={r.status} />
-          </h2>
+          </h1>
         </div>
+        <StatusStepper status={r.status} />
         <dl className="facts">
           <div>
-            <dt>Task</dt>
+            <dt>
+              <Icon name="list" />
+              Task
+            </dt>
             <dd>{r.task_name}</dd>
           </div>
           <div>
-            <dt>Client</dt>
+            <dt>
+              <Icon name="user" />
+              Client
+            </dt>
             <dd>{r.client_organisation ?? r.client_name}</dd>
           </div>
           <div>
-            <dt>Deadline</dt>
+            <dt>
+              <Icon name="calendar" />
+              Deadline
+            </dt>
             <dd>{formatDate(r.deadline)}</dd>
           </div>
           <div>
-            <dt>Submitted</dt>
+            <dt>
+              <Icon name="clock" />
+              Submitted
+            </dt>
             <dd>{formatDateTime(r.created_at)}</dd>
           </div>
           <div>
-            <dt>Episodes</dt>
+            <dt>
+              <Icon name="layers" />
+              Episodes assigned
+            </dt>
             <dd>
               <Progress done={r.assigned_count} total={r.episodes_requested} />
             </dd>
@@ -102,8 +160,7 @@ export function RequestDetail() {
         </dl>
         {r.notes && <p className="notes">{r.notes}</p>}
 
-        <ErrorBanner error={transition.error} />
-        {r.available_transitions.length > 0 && !rejecting && (
+        {r.available_transitions.length > 0 && (
           <div className="actions">
             {r.available_transitions.map((to) => {
               const blocked = to === 'delivered' && missing > 0
@@ -115,6 +172,7 @@ export function RequestDetail() {
                   title={blocked ? `Assign ${missing} more episode(s) before delivering` : undefined}
                   onClick={() => (to === 'rejected' ? setRejecting(true) : transition.mutate({ to }))}
                 >
+                  <Icon name={ACTION_ICON[to]} size={16} />
                   {TRANSITION_LABEL[to]}
                 </button>
               )
@@ -124,63 +182,82 @@ export function RequestDetail() {
             )}
           </div>
         )}
-        {rejecting && (
-          <div className="form">
-            <label>
-              Why are you rejecting this delivery? <small className="muted">(optional)</small>
-              <textarea rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
-            </label>
-            <div className="actions">
-              <button className="btn" onClick={() => setRejecting(false)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-danger"
-                disabled={transition.isPending}
-                onClick={() => transition.mutate({ to: 'rejected', note })}
-              >
-                Confirm rejection
-              </button>
-            </div>
-          </div>
-        )}
       </section>
 
-      <section className="card">
-        <h3>Assigned episodes</h3>
-        <ErrorBanner error={unassign.error} />
+      <ConfirmDialog
+        open={rejecting}
+        title="Reject this delivery?"
+        confirmLabel="Confirm rejection"
+        danger
+        busy={transition.isPending}
+        onCancel={() => setRejecting(false)}
+        onConfirm={() => transition.mutate({ to: 'rejected', note })}
+      >
+        <p className="muted">The request goes back to the operators for rework. Tell them what was wrong.</p>
+        <label className="field">
+          Reason <span className="hint">(optional)</span>
+          <textarea rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title="Remove this episode?"
+        confirmLabel="Remove"
+        danger
+        busy={unassign.isPending}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => removing && unassign.mutate(removing.id)}
+      >
+        <p>
+          <strong>{removing?.episode_id}</strong> will be unassigned and become available for other requests.
+        </p>
+      </ConfirmDialog>
+
+      <section className="card card-flush" aria-labelledby="assigned-title">
+        <h2 id="assigned-title" className="title-icon padded-title">
+          <Icon name="layers" size={20} />
+          Assigned episodes
+        </h2>
         {r.episodes.length === 0 ? (
-          <Empty>No episodes assigned yet.</Empty>
+          <Empty title="No episodes assigned yet">
+            {editable ? 'Use the picker below to assign episodes.' : 'An operator has not assigned any episodes.'}
+          </Empty>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table aria-label="Assigned episodes" className="table-stack">
               <thead>
                 <tr>
-                  <th>Episode</th>
-                  <th>Robot</th>
-                  <th>Recorded</th>
-                  <th>Length</th>
-                  <th>Quality</th>
-                  {editable && <th />}
+                  <th scope="col">Episode</th>
+                  <th scope="col">Robot</th>
+                  <th scope="col" className="hide-sm">
+                    Recorded
+                  </th>
+                  <th scope="col">Length</th>
+                  <th scope="col">Quality</th>
+                  {editable && (
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {r.episodes.map((e) => (
                   <tr key={e.id}>
-                    <td>{e.episode_id}</td>
-                    <td>{e.robot_id}</td>
-                    <td>{formatDateTime(e.recorded_at)}</td>
-                    <td>{formatDuration(e.duration_seconds)}</td>
-                    <td>
+                    <td data-label="Episode">{e.episode_id}</td>
+                    <td data-label="Robot">{e.robot_id}</td>
+                    <td className="hide-sm" data-label="Recorded">
+                      {formatDateTime(e.recorded_at)}
+                    </td>
+                    <td data-label="Length">{formatDuration(e.duration_seconds)}</td>
+                    <td data-label="Quality">
                       <span className={`quality quality-${e.quality}`}>{e.quality}</span>
                     </td>
                     {editable && (
-                      <td>
-                        <button
-                          className="btn btn-small"
-                          disabled={unassign.isPending}
-                          onClick={() => unassign.mutate(e.id)}
-                        >
+                      <td className="num cell-end" data-label="">
+                        <button className="btn btn-small" onClick={() => setRemoving(e)} aria-label={`Remove ${e.episode_id}`}>
+                          <Icon name="trash" size={15} />
                           Remove
                         </button>
                       </td>
@@ -195,8 +272,11 @@ export function RequestDetail() {
 
       {editable && <EpisodePicker request={r} />}
 
-      <section className="card">
-        <h3>History</h3>
+      <section className="card" aria-labelledby="history-title">
+        <h2 id="history-title" className="title-icon">
+          <Icon name="clock" size={20} />
+          History
+        </h2>
         <ol className="timeline">
           {[...r.history].reverse().map((h, i) => (
             <li key={i}>

@@ -20,11 +20,11 @@ def build_database_url() -> str:
 
     return URL.create(
         "postgresql+psycopg",
-        username=env("POSTGRES_USER", "desk"),
-        password=env("POSTGRES_PASSWORD", "desk"),
+        username=env("POSTGRES_USER", "data-stream_pipeline"),
+        password=env("POSTGRES_PASSWORD", "data-stream_pipeline"),
         host=env("POSTGRES_HOST", "localhost"),
         port=int(env("POSTGRES_PORT", "5432")),
-        database=env("POSTGRES_DB", "desk"),
+        database=env("POSTGRES_DB", "data-stream_pipeline"),
     ).render_as_string(hide_password=False)
 
 
