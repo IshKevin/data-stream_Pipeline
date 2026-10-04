@@ -134,3 +134,32 @@ def test_database_url_is_assembled_from_parts_with_escaping(monkeypatch):
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://explicit@host/db")
     assert build_database_url() == "postgresql+psycopg://explicit@host/db"  # explicit URL wins
+
+
+def test_wait_for_db_succeeds_when_up_and_reports_the_reason_when_not(monkeypatch, capsys):
+    from app.cli import wait_for_db
+
+    assert wait_for_db(timeout=5) == 0
+    assert "database ready" in capsys.readouterr().out
+
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://desk:x@127.0.0.1:1/desk"
+    )  # nothing listens on :1
+    assert wait_for_db(timeout=1) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR: database not reachable at desk@127.0.0.1:1/desk")
+    assert "x@" not in err  # the password never reaches the logs
+
+
+def test_empty_postgres_variables_fall_back_to_defaults(monkeypatch):
+    """Platforms such as Coolify may pass empty strings for variables left blank in the UI."""
+    from sqlalchemy.engine import make_url
+
+    from app.config import build_database_url
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    for name in ("POSTGRES_USER", "POSTGRES_DB", "POSTGRES_HOST"):
+        monkeypatch.setenv(name, "")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "secret")
+    url = make_url(build_database_url())
+    assert (url.username, url.database, url.host) == ("desk", "desk", "localhost")
