@@ -1,12 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
-from starlette.exceptions import HTTPException
 
 from app.config import get_settings
 from app.db import get_engine
@@ -25,41 +22,7 @@ async def lifespan(app: FastAPI):
     log.info("api stopping")
 
 
-SECURITY_HEADERS = {
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Referrer-Policy": "same-origin",
-    "Content-Security-Policy": (
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-        "frame-ancestors 'none'"
-    ),
-}
-
-
-class SPAStaticFiles(StaticFiles):
-    """Serves the built React app: real files as-is, any other path falls back to index.html
-    (client-side routing). Used only when WEB_DIST_DIR is set, i.e. in single-container
-    deployments; with docker compose nginx does this job."""
-
-    async def get_response(self, path: str, scope):
-        if path == "api" or path.startswith("api/"):
-            raise HTTPException(status_code=404)  # unknown API routes stay JSON 404s
-        try:
-            response = await super().get_response(path, scope)
-        except HTTPException as exc:
-            if exc.status_code != 404:
-                raise
-            path = "index.html"
-            response = await super().get_response(path, scope)
-        immutable = path.startswith("assets/")  # content-hashed build output
-        response.headers["Cache-Control"] = (
-            "public, max-age=31536000, immutable" if immutable else "no-cache"
-        )
-        response.headers.update(SECURITY_HEADERS)
-        return response
-
-
-def create_app(web_dist_dir: Path | None = None) -> FastAPI:
+def create_app() -> FastAPI:
     app = FastAPI(
         title="data-stream_Pipeline",
         version="0.1.0",
@@ -103,11 +66,6 @@ def create_app(web_dist_dir: Path | None = None) -> FastAPI:
             log.exception("readiness check failed")
             return JSONResponse(status_code=503, content={"status": "unavailable"})
         return {"status": "ready"}
-
-    dist = web_dist_dir or get_settings().web_dist_dir
-    if dist is not None and Path(dist, "index.html").is_file():
-        # Mounted last so every API route above takes precedence.
-        app.mount("/", SPAStaticFiles(directory=dist, html=True), name="web")
 
     return app
 
