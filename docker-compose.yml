@@ -65,6 +65,14 @@ services:
     environment: *api-env
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
+    # `make dev` (docker compose up --watch): rebuild + restart the API when its code or lockfile changes.
+    # Ignored by a plain `docker compose up`.
+    develop:
+      watch:
+        - action: rebuild
+          path: ./api/app
+        - action: rebuild
+          path: ./api/uv.lock
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -14,8 +14,8 @@ up: .env ## Build and start everything (db, migrations, seed, api, web)
 	$(COMPOSE) up --build -d
 	@echo "Web: http://localhost:$(or $(WEB_PORT),8080)   API docs: http://localhost:$(or $(API_PORT),8000)/api/docs"
 
-dev: .env ## Dev mode: rebuild + live-sync api/app into the container (docker compose watch)
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up --build --watch
+dev: .env ## Dev mode: rebuild + restart the API on code changes (docker compose watch)
+	$(COMPOSE) up --build --watch
 
 down: ## Stop the stack (keeps the database volume)
 	$(COMPOSE) down
