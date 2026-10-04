@@ -17,6 +17,8 @@ FROM builder AS test
 RUN uv sync --frozen --no-install-project
 ENV PATH="/opt/venv/bin:$PATH" PYTHONPATH=/app
 COPY . .
+# the import tests run against the real messy sample file (named build context from docker-compose.yml)
+COPY --from=seed . /seed
 
 # ---- runtime: small final image, non-root ---------------------------------------------------
 FROM python:3.12-slim AS runtime
@@ -31,6 +33,7 @@ COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app alembic ./alembic
 COPY --chown=app:app app ./app
 COPY --chown=app:app bootstrap.sh ./bootstrap.sh
+COPY --from=seed --chown=app:app . /seed
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \

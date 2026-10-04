@@ -1,13 +1,33 @@
+import os
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+
+def build_database_url() -> str:
+    """`DATABASE_URL` if set, otherwise assembled from the POSTGRES_* variables.
+
+    Building the URL here (instead of string-interpolating it in docker-compose.yml) means a
+    password containing characters such as `@ / # : %` is escaped correctly."""
+    explicit = os.environ.get("DATABASE_URL")
+    if explicit:
+        return explicit
+    return URL.create(
+        "postgresql+psycopg",
+        username=os.environ.get("POSTGRES_USER", "desk"),
+        password=os.environ.get("POSTGRES_PASSWORD", "desk"),
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
+        database=os.environ.get("POSTGRES_DB", "desk"),
+    ).render_as_string(hide_password=False)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
-    database_url: str = "postgresql+psycopg://desk:desk@localhost:5432/desk"
+    database_url: str = Field(default_factory=build_database_url)
     jwt_secret: str
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
