@@ -18,7 +18,7 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str | None) -> bool:
     try:
         return _hasher.verify(password_hash or _DUMMY_HASH, password) and password_hash is not None
-    except (VerificationError, InvalidHashError):
+    except VerificationError, InvalidHashError:
         return False
 
 
@@ -40,5 +40,5 @@ def decode_access_token(token: str) -> int | None:
             token, s.jwt_secret, algorithms=[s.jwt_algorithm], options={"require": ["exp", "sub"]}
         )
         return int(payload["sub"])
-    except (jwt.PyJWTError, ValueError, KeyError):
+    except jwt.PyJWTError, ValueError, KeyError:
         return None
