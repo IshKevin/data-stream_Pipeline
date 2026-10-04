@@ -1,109 +1,40 @@
-# data-stream_Pipeline
+# Data stream Pipeline
 
 [![CI](https://github.com/IshKevin/data-stream_Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/IshKevin/data-stream_Pipeline/actions/workflows/ci.yml)
 
-Internal platform that replaces the spreadsheet for robot-teleoperation **dataset requests**: clients ask for episodes,
-operators assign episodes and move the request through a workflow, and the client accepts or rejects the delivery.
-Every status change is recorded (who, when, why). Episodes come from a messy CSV export that can be imported safely, any
-number of times.
+Internal platform for managing **robot-teleoperation dataset requests**. Clients request episodes, operators assign them and move
+each request through a controlled workflow, and the client accepts or rejects the delivery. Every status change is recorded
+(who, when, why), and episode metadata is imported from a messy CSV export safely and repeatably.
 
-**Stretch item chosen: real-time updates** – new requests and status changes appear live (Server-Sent Events) for
-operators and for the owning client, without refreshing.
-
-## Contents
-
-1. [Reviewer guide](#reviewer-guide)
-2. [What it does](#what-it-does)
-3. [Architecture and tech stack](#architecture-and-tech-stack)
-4. [Quick start (local)](#quick-start-local) · [Seed users](#seed-users)
-5. [Configuration](#configuration)
-6. [Testing](#testing)
-7. [Development](#development)
-8. [API reference](#api-reference)
-9. [Security and production checklist](#security-and-production-checklist)
-10. [Deploy on a VPS with Coolify](#deploy-on-a-vps-with-coolify)
-11. [Troubleshooting](#troubleshooting)
-
-Design decisions, the hardest trade-offs, what went wrong, security and scaling notes: **[NOTES.md](NOTES.md)**.
-
----
-
-## Reviewer guide
-
-> **For whoever is reviewing this project.** It implements the technical test brief (`WORK_TASK.md`: *Dataset Request Desk*).
-> This page is organised so you can verify each requirement quickly. The reasoning behind the choices is in **[NOTES.md](NOTES.md)**
-> (design, hardest decisions, what went wrong, security, scale, AI tooling).
+* **Role-based access** (client · operator · admin) enforced on the server
+* **Workflow engine** with audited transitions and database-enforced assignment rules
+* **Idempotent CSV import** with a detailed report of what was imported, cleaned up, and skipped (and why)
+* **Analytics computed in PostgreSQL**: episodes per day per robot, fulfilment and median delivery time, top tasks
+* **Live updates** over Server-Sent Events
+* **One-command start** with Docker Compose; CI; JSON logs and health endpoints
 
 | | |
 |---|---|
-| **Live demo** | <http://vkuc6nzbv6xn6p97uscuiceb.197.243.27.200.sslip.io/> – plain HTTP, demo accounts below (kept on purpose so you can sign in) |
-| **Run it yourself** | `cp .env.example .env && docker compose up --build` → <http://localhost:8080> (database, migrations, seed users, sample data, API and UI from a clean clone, ~1 minute) |
-| **Run the tests** | `make test` – 195 API tests in Docker · `make ci` – everything CI runs, incl. 27 web tests |
-| **Demo accounts** | `client-a@example.com` / `client123` · `client-b@example.com` / `client123` · `ops1@example.com` / `ops123` · `admin@example.com` / `admin123` |
-| **Stretch item** | **Real-time** updates over Server-Sent Events (also deployed on a VPS with Coolify – not the stretch item, just for convenience) |
+| **Live demo** | <http://vkuc6nzbv6xn6p97uscuiceb.197.243.27.200.sslip.io/> (plain HTTP; demo accounts listed [below](#demo-accounts)) |
+| **Run locally** | `cp .env.example .env && docker compose up --build` → <http://localhost:8080> |
+| **Tests** | `make test` (195 API tests in Docker) · `make ci` (everything CI runs, including 27 web tests) |
+| **Design notes** | [NOTES.md](NOTES.md) |
 
-### 1 · See it work (≈ 10 minutes)
+## Contents
 
-Use two browser windows (one private) so you can watch the live updates: **window A = client**, **window B = operator**.
-
-| # | Do this | You should see | Brief |
-|---|---|---|---|
-| 1 | Sign in as `client-a`, then `ops1`, then `admin` | the menu differs per role (client: *Requests*; operator: + *Analytics*, *Import*; admin: + *Users*) | §2 roles |
-| 2 | **A:** New request → "pick cup", 2 episodes, a future deadline | status **Submitted**, a workflow stepper, a history entry | §3 request |
-| 3 | **B** (already open on *Requests*) | the new request **appears without refreshing**; the top bar shows **Live** | §4.4 stretch |
-| 4 | Sign in as `client-b` and open that request's URL | "Request not found" – clients never see each other's data (API: 404, not 403) | §2 isolation |
-| 5 | **B:** open it → **Start work**; look at **Mark delivered** | disabled – "Assign 2 more episode(s) before delivering"; **A** updates live | §3 delivery rule |
-| 6 | **B:** in the picker set *Quality = Bad* → tick boxes | disabled (bad episodes can't be assigned). Assign 1 good + 1 usable | §3 assignment rules |
-| 7 | **B:** **Mark delivered**; **A:** **Reject delivery** with a reason; **B:** **Start work** → **Mark delivered**; **A:** **Accept delivery** | the full reject → rework → accept loop; **History** shows *who* and *when* for every step, plus the reason | §3 workflow + audit |
-| 8 | **B:** *Import* → upload `seed/episodes.csv` (same file the system loaded at startup) | **0 imported, 191 skipped** with reason codes and line numbers – the import is idempotent; every skip is explained | §3 import |
-| 9 | **B:** *Analytics* | episodes per day per robot · requests by status + median submitted→delivered · top-5 tasks by good episodes | §4.1 analytics |
-| 10 | **admin:** *Users* → add a user, change their role, deactivate them | a deactivated user is locked out immediately, even with an existing session | §2 admin |
-| 11 | `curl <live-or-local>/health` · `/ready` · `docker compose logs api` | JSON status; **one JSON log line per request** with method, path, status, duration, user id | §4.1 ops |
-
-### 2 · Requirement → implementation → how to verify
-
-| Brief | Where | Verified by |
-|---|---|---|
-| **§2** server-side roles & authorization | `api/app/deps.py` (`require_*`), `services/requests.py::get_request_for_user` | `tests/test_authorization.py` – 401 on every protected route, full role matrix, client isolation |
-| **§3** import: messy CSV, idempotent, clear report | `api/app/services/importer.py`, `POST /api/episodes/import`, `python -m app.cli import-episodes` | `tests/test_import.py` – twice-in-a-row, batch boundaries, never overwrites, every reason, the real seed file |
-| **§3** workflow, who/when recorded | `api/app/workflow.py`, table `request_status_history` | `tests/test_transitions.py` – every from × to × role |
-| **§3** assignment rules | `services/requests.py`, `UNIQUE(assignments.episode_pk)` | `tests/test_assignments.py` incl. a concurrent double-assign race |
-| **§4.1** REST API, relational DB, migrations | FastAPI + PostgreSQL + Alembic (`api/alembic/versions/0001_*.py`) | migration up/down + "models match migrations" test |
-| **§4.1** analytics in the database | `api/app/routers/analytics.py` | `tests/test_analytics.py` (exact numbers; index-usage guard); 5 M-row behaviour below and NOTES §5 |
-| **§4.1** `/health` + structured logging | `api/app/main.py`, `logging_config.py` | `tests/test_ops.py` |
-| **§4.2** UI: client + operator flows | `web/src/` (React + TypeScript) | 27 web tests · `web/e2e/smoke.mjs` (17-step browser flow) |
-| **§4.3** one command starts everything | `docker-compose.yml` (db → migrate/seed → api → web) | CI `stack` job builds it the way a server runs it |
-| **§4.3** tests with one command · CI | `make test` / `make ci` · `.github/workflows/ci.yml` | api · web · full-stack jobs |
-| **§5** NOTES.md (6 sections) | [NOTES.md](NOTES.md) | – |
-| **§6** commit history | `git log --oneline` | small, conventional commits |
-
-### 3 · If you read only a few files
-
-`api/app/workflow.py` (the whole transition table, no I/O) → `api/app/services/requests.py` (transactions, locking, assignment rules) →
-`api/app/services/importer.py` (what is repaired / rejected) → `api/app/routers/analytics.py` (the three SQL reports) →
-`api/app/deps.py` (auth) → `api/tests/` → `web/src/pages/RequestDetail.tsx`.
-
-### 4 · Decisions worth discussing (details in NOTES)
-
-* **The database is the arbiter** of "one episode → one request" (`UNIQUE` constraint) and a row lock serialises delivery vs assignment – tested with a race.
-* **Import policy:** repair the unambiguous and cosmetic, reject what changes meaning (e.g. missing quality), *first row wins* on conflicting duplicates, never update existing rows.
-* **404 instead of 403** for other clients' requests, so ids can't be probed; admins can't accept/reject – that step belongs to the client.
-* **"Median submitted → delivered"** uses the *first* delivery of a request (reworked requests count once).
-* **Real-time via SSE**, in-process: simple and correct for one replica; `LISTEN/NOTIFY` is the documented next step.
-
-### 5 · Known limitations (stated openly)
-
-* The live demo runs over **plain HTTP** with the **public demo accounts** – a deliberate choice for review; lock-down steps are in the production checklist.
-* Login is throttled **per client IP** only (no per-account lock-out); the JWT lives in `localStorage` (XSS ⇒ a 60-minute token) – see NOTES §4 for the two vulnerabilities I worry about most.
-* SSE broker is in-process (single API replica); analytics for an *all-time* window on millions of rows would want a rollup table.
-* TypeScript stays on 6.x and there is no `jsx-a11y` lint because those tools don't support the newest versions yet – accessibility is covered by role-based tests and an axe-core audit instead.
-
-### 6 · What has been verified
-
-195 API tests and 27 web tests (green in CI) · a 17-step real-browser run of the whole flow, also against the live deployment · axe-core audit of every
-page (0 WCAG 2.1 A/AA violations) · a responsiveness check at 7 screen sizes (320 → 1536 px) · an end-to-end acceptance run of 70 checks against the running
-stack during development, which recomputed the analytics with independent SQL · the Compose stack started from a clean clone, with and without fixed host ports ·
-login rate limiting and security headers checked on the deployment.
+1. [What it does](#what-it-does)
+2. [Walkthrough](#walkthrough)
+3. [Requirements traceability](#requirements-traceability)
+4. [Code map](#code-map) · [Design decisions](#design-decisions) · [Known limitations](#known-limitations) · [Verification](#verification)
+5. [Architecture and tech stack](#architecture-and-tech-stack)
+6. [Quick start (local)](#quick-start-local) · [Demo accounts](#demo-accounts)
+7. [Configuration](#configuration)
+8. [Testing](#testing)
+9. [Development](#development)
+10. [API reference](#api-reference)
+11. [Security and production checklist](#security-and-production-checklist)
+12. [Deploy on a VPS with Coolify](#deploy-on-a-vps-with-coolify)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -159,6 +90,73 @@ keyboard-accessible dialogs, toasts in a live region, skip link, `prefers-reduce
 
 ---
 
+## Walkthrough
+
+An end-to-end tour of the system (about 10 minutes). Use two browser windows – one private – to observe the live updates: **window A = client**, **window B = operator**. Accounts are listed under [Demo accounts](#demo-accounts).
+
+| # | Action | Expected result | Area |
+|---|---|---|---|
+| 1 | Sign in as `client-a`, then `ops1`, then `admin` | the menu differs per role (client: *Requests*; operator: + *Analytics*, *Import*; admin: + *Users*) | roles |
+| 2 | **A:** New request → "pick cup", 2 episodes, a future deadline | status **Submitted**, a workflow stepper, a history entry | requests |
+| 3 | **B** (open on *Requests*) | the new request **appears without refreshing**; the top bar shows **Live** | real-time |
+| 4 | Sign in as `client-b` and open that request's URL | "Request not found" – clients never see each other's data (API: 404, not 403) | isolation |
+| 5 | **B:** open it → **Start work**; look at **Mark delivered** | disabled – "Assign 2 more episode(s) before delivering"; **A** updates live | delivery rule |
+| 6 | **B:** in the picker set *Quality = Bad* → tick boxes | disabled (bad episodes can't be assigned). Assign 1 good + 1 usable | assignment rules |
+| 7 | **B:** **Mark delivered**; **A:** **Reject delivery** with a reason; **B:** **Start work** → **Mark delivered**; **A:** **Accept delivery** | the full reject → rework → accept loop; **History** shows *who* and *when* for every step, plus the reason | workflow + audit |
+| 8 | **B:** *Import* → upload `seed/episodes.csv` (the file loaded at startup) | **0 imported, 191 skipped** with reason codes and line numbers – the import is idempotent; every skip is explained | import |
+| 9 | **B:** *Analytics* | episodes per day per robot · requests by status + median submitted→delivered · top-5 tasks by good episodes | analytics |
+| 10 | **admin:** *Users* → add a user, change their role, deactivate them | a deactivated user is locked out immediately, even with an existing session | administration |
+| 11 | `GET /health` · `GET /ready` · `docker compose logs api` | JSON status; **one JSON log line per request** with method, path, status, duration, user id | operations |
+
+## Requirements traceability
+
+| Requirement | Implementation | Verification |
+|---|---|---|
+| server-side roles & authorization | `api/app/deps.py` (`require_*`), `services/requests.py::get_request_for_user` | `tests/test_authorization.py` – 401 on every protected route, full role matrix, client isolation |
+| import: messy CSV, idempotent, clear report | `api/app/services/importer.py`, `POST /api/episodes/import`, `python -m app.cli import-episodes` | `tests/test_import.py` – twice-in-a-row, batch boundaries, never overwrites, every reason, the real seed file |
+| workflow, who/when recorded | `api/app/workflow.py`, table `request_status_history` | `tests/test_transitions.py` – every from × to × role |
+| assignment rules | `services/requests.py`, `UNIQUE(assignments.episode_pk)` | `tests/test_assignments.py` incl. a concurrent double-assign race |
+| REST API, relational DB, migrations | FastAPI + PostgreSQL + Alembic (`api/alembic/versions/0001_*.py`) | migration up/down + "models match migrations" test |
+| analytics in the database | `api/app/routers/analytics.py` | `tests/test_analytics.py` (exact numbers; index-usage guard); scaling behaviour in [Analytics](#analytics-get-apianalyticsfromto) and NOTES §5 |
+| `/health` + structured logging | `api/app/main.py`, `logging_config.py` | `tests/test_ops.py` |
+| UI: client + operator flows | `web/src/` (React + TypeScript) | 27 web tests · `web/e2e/smoke.mjs` (17-step browser flow) |
+| one command starts everything | `docker-compose.yml` (db → migrate/seed → api → web) | CI `stack` job builds it the way a server runs it |
+| tests with one command · CI | `make test` / `make ci` · `.github/workflows/ci.yml` | api · web · full-stack jobs |
+| design notes (design, trade-offs, incidents, security, scale, AI tooling) | [NOTES.md](NOTES.md) | – |
+| commit history | `git log --oneline` | small, conventional commits |
+
+## Code map
+
+Suggested reading order: `api/app/workflow.py` (the whole transition table, no I/O) → `api/app/services/requests.py` (transactions, locking, assignment rules) →
+`api/app/services/importer.py` (what is repaired / rejected) → `api/app/routers/analytics.py` (the three SQL reports) →
+`api/app/deps.py` (auth) → `api/tests/` → `web/src/pages/RequestDetail.tsx`.
+
+## Design decisions
+
+Summary; the full reasoning is in [NOTES.md](NOTES.md).
+
+* **The database is the arbiter** of "one episode → one request" (`UNIQUE` constraint) and a row lock serialises delivery vs assignment – tested with a race.
+* **Import policy:** repair the unambiguous and cosmetic, reject what changes meaning (e.g. missing quality), *first row wins* on conflicting duplicates, never update existing rows.
+* **404 instead of 403** for other clients' requests, so ids can't be probed; admins can't accept/reject – that step belongs to the client.
+* **"Median submitted → delivered"** uses the *first* delivery of a request (reworked requests count once).
+* **Real-time via SSE**, in-process: simple and correct for one replica; `LISTEN/NOTIFY` is the documented next step.
+
+## Known limitations
+
+* The live demo runs over **plain HTTP** with the **public demo accounts** – a deliberate choice for evaluation; the lock-down steps are in the [production checklist](#security-and-production-checklist).
+* Login is throttled **per client IP** only (no per-account lock-out); the JWT lives in `localStorage` (XSS ⇒ a 60-minute token) – see NOTES §4 for the two highest-risk vulnerabilities.
+* SSE broker is in-process (single API replica); analytics for an *all-time* window on millions of rows would want a rollup table.
+* TypeScript stays on 6.x and there is no `jsx-a11y` lint because those tools don't support the newest versions yet – accessibility is covered by role-based tests and an axe-core audit instead.
+
+## Verification
+
+195 API tests and 27 web tests (green in CI) · a 17-step real-browser run of the whole flow, also against the live deployment · axe-core audit of every
+page (0 WCAG 2.1 A/AA violations) · a responsiveness check at 7 screen sizes (320 → 1536 px) · an end-to-end acceptance run of 70 checks against the running
+stack, which recomputed the analytics with independent SQL · the Compose stack started from a clean clone, with and without fixed host ports ·
+login rate limiting and security headers checked on the deployment.
+
+---
+
 ## Architecture and tech stack
 
 ```
@@ -210,10 +208,10 @@ The fixed ports (`WEB_PORT=8080`, `API_PORT=8000`, `DB_PORT=5434` in `.env.examp
 `127.0.0.1`. If one is taken, change it in `.env`. **On a server leave them unset**: Docker then picks free random loopback
 ports (`docker compose port web 80`), so nothing can clash. Stop with `make down`; `make reset` also deletes the data.
 
-### Seed users
+### Demo accounts
 
 Created from `seed/users.json` by `python -m app.cli seed-users` (passwords are stored as argon2 hashes). **Demo credentials only**
-– they exist so reviewers can sign in (the live demo keeps them on purpose); set `SEED_DEMO_DATA=false` for anything real.
+– they exist so the system can be evaluated without setup (the live demo keeps them on purpose so it can be evaluated); set `SEED_DEMO_DATA=false` for anything real.
 
 | Role | Email | Password |
 |---|---|---|
@@ -345,14 +343,14 @@ Logging: **one JSON line per request** to stdout – method, path, status, durat
 What is built in: argon2 password hashes, short-lived JWTs (secret ≥ 32 chars enforced), the user re-read on every request,
 server-side authorization everywhere, strict input validation, parameterised SQL, CSP without inline scripts, `nosniff`,
 `X-Frame-Options`, Permissions-Policy, COOP/CORP, HSTS (when behind HTTPS), no source maps, `noindex`, API/migrate containers running
-non-root with a read-only filesystem and no capabilities. Details and the two vulnerabilities I worry about most: [NOTES.md §4](NOTES.md).
+non-root with a read-only filesystem and no capabilities. Details and the two highest-risk vulnerabilities: [NOTES.md §4](NOTES.md).
 
 Before exposing an instance to real users:
 
 | | |
 |---|---|
 | **Secrets** | long random `POSTGRES_PASSWORD` and `JWT_SECRET` in the platform's environment – never in git |
-| **Accounts** | start with `SEED_DEMO_DATA=true`, sign in as `admin@example.com`, **create your own admin, deactivate the demo accounts**, then set `SEED_DEMO_DATA=false` |
+| **Accounts** | start with `SEED_DEMO_DATA=true`, sign in as `admin@example.com`, **create a dedicated admin account, deactivate the demo accounts**, then set `SEED_DEMO_DATA=false` |
 | **TLS** | terminate HTTPS at the reverse proxy; the web container then sends HSTS by itself (only when `X-Forwarded-Proto: https`) |
 | **Brute force** | nginx throttles `POST /api/auth/login` to ~60/min per real client address (burst 20) → `429`; spoofed `X-Forwarded-For` is ignored |
 | **Health** | point the platform's check at `GET /health` (liveness) or `GET /ready` (database); every container also has a Docker `HEALTHCHECK` |
@@ -371,7 +369,7 @@ The whole system is the single `docker-compose.yml` (Compose v2), deployed as on
 (one-shot) → `api` → `web`. Only `web` needs a domain – the API and database are never public.
 
 **Server:** Docker Engine 25+ (Coolify installs it), **≥ 2 GB RAM** (three images are built per deploy; add swap on 1 GB machines),
-~10 GB free disk, and a DNS `A` record for your domain.
+~10 GB free disk, and a DNS `A` record for the domain.
 
 1. **Create the resource.** Coolify → *Projects → New Resource → Docker Compose (from a Git repository)* → this repo, branch `main`;
    compose location `/docker-compose.yml`, base directory `/`.
@@ -392,7 +390,7 @@ The whole system is the single `docker-compose.yml` (Compose v2), deployed as on
    issues the certificate. `api`, `db` and `migrate` get no domain.
 4. **Deploy.** Order: `db` healthy → `migrate` (migrations, optional seed, exits 0) → `api` healthy → `web` healthy. Check
    `http://vkuc6nzbv6xn6p97uscuiceb.197.243.27.200.sslip.io/health` → `{"status":"ok"}` and `/ready` → `{"status":"ready"}`.
-5. **Lock down** (see the checklist above): create your own admin, deactivate the demo accounts, set `SEED_DEMO_DATA=false`, redeploy.
+5. **Lock down** (see the checklist above): create a dedicated admin, deactivate the demo accounts, set `SEED_DEMO_DATA=false`, redeploy.
 
 **Operating it:** push to `main` (enable the Git webhook for auto-deploy) · back up the `pgdata` volume, e.g. daily from cron
 `docker exec $(docker ps -qf name=db-) sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' | gzip > /backups/pipeline-$(date +%F).sql.gz`
