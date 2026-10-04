@@ -1,3 +1,5 @@
+name: data-stream_pipeline
+
 x-api-env: &api-env
   # The app assembles (and URL-escapes) the database URL from these parts.
   POSTGRES_HOST: db
@@ -7,6 +9,14 @@ x-api-env: &api-env
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (copy .env.example)}
   JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+# Containers that only run our own code: no root FS writes, no capabilities, no privilege escalation.
+x-hardened: &hardened
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
 
 services:
   db:
@@ -22,13 +32,17 @@ services:
       - "127.0.0.1:${DB_PORT:-5434}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-desk} -d ${POSTGRES_DB:-desk}"]
-      interval: 3s
+      interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 15s
+      start_interval: 1s     # poll quickly while starting, then every `interval`
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
 
   # One-shot job: migrations + seed users + sample episodes. The API waits for it.
   migrate:
+    <<: *hardened
     build:
       context: .                 # repo root, so the image can include seed/
       dockerfile: api/Dockerfile
@@ -43,6 +57,7 @@ services:
     restart: "no"
 
   api:
+    <<: *hardened
     build:
       context: .                 # repo root, so the image can include seed/
       dockerfile: api/Dockerfile
@@ -58,6 +73,8 @@ services:
   web:
     build:
       context: ./web
+    init: true
+    security_opt: ["no-new-privileges:true"]
     ports:
       - "${WEB_PORT:-8080}:80"
     depends_on:
