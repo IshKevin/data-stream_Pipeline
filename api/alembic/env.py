@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, pool
 
 from alembic import context
 from app import models  # noqa: F401  (register tables on Base.metadata)
+from app.config import normalize_database_url
 from app.db import Base
 
 config = context.config
@@ -16,7 +17,9 @@ target_metadata = Base.metadata
 
 def _url() -> str:
     # Alembic must not depend on the full app Settings (e.g. JWT_SECRET).
-    return os.environ.get("MIGRATION_DATABASE_URL") or os.environ["DATABASE_URL"]
+    return normalize_database_url(
+        os.environ.get("MIGRATION_DATABASE_URL") or os.environ["DATABASE_URL"]
+    )
 
 
 def run_migrations_offline() -> None:
