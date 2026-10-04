@@ -29,7 +29,9 @@ services:
       # PostgreSQL 18+ images keep data in a versioned subdirectory; mount the parent.
       - pgdata:/var/lib/postgresql
     ports:
-      - "127.0.0.1:${DB_PORT:-5434}:5432"
+      # Host ports are optional: with DB_PORT unset Docker picks a free random loopback port (`docker compose port db 5432`),
+      # so this can never clash with another app on the server. Set DB_PORT in .env for a fixed local port.
+      - "127.0.0.1:${DB_PORT:-}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-data-stream_pipeline} -d ${POSTGRES_DB:-data-stream_pipeline}"]
       interval: 5s
@@ -64,7 +66,9 @@ services:
       target: runtime
     environment: *api-env
     ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      # Optional, loopback only (the API is normally reached through the web container). Unset -> random free port.
+      # NB: port 8000 is Coolify's own dashboard port, so never default to it.
+      - "127.0.0.1:${API_PORT:-}:8000"
     # `make dev` (docker compose up --watch): rebuild + restart the API when its code or lockfile changes.
     # Ignored by a plain `docker compose up`.
     develop:
@@ -84,7 +88,9 @@ services:
     init: true
     security_opt: ["no-new-privileges:true"]
     ports:
-      - "${WEB_PORT:-8080}:80"
+      # Behind Coolify/Traefik the proxy reaches this container over the Docker network on port 80, so no fixed host port is
+      # needed. Unset WEB_PORT -> random free loopback port; .env.example sets WEB_PORT=8080 for local development.
+      - "127.0.0.1:${WEB_PORT:-}:80"
     depends_on:
       api:
         condition: service_healthy

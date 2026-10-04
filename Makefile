@@ -12,7 +12,7 @@ help: ## Show this help
 
 up: .env ## Build and start everything (db, migrations, seed, api, web)
 	$(COMPOSE) up --build -d
-	@echo "Web: http://localhost:$(or $(WEB_PORT),8080)   API docs: http://localhost:$(or $(API_PORT),8000)/api/docs"
+	@echo "Web: http://$$($(COMPOSE) port web 80)   API docs: http://$$($(COMPOSE) port api 8000)/api/docs"
 
 dev: .env ## Dev mode: rebuild + restart the API on code changes (docker compose watch)
 	$(COMPOSE) up --build --watch
@@ -39,7 +39,7 @@ ci: .env ## Run what GitHub CI runs (lint, types, tests, build, compose check) o
 	$(COMPOSE) config --quiet
 	$(COMPOSE) up -d --wait db
 	cd api && uv sync --frozen && uv run ruff check . && uv run ruff format --check . && uv run mypy app \
-	  && POSTGRES_HOST=localhost POSTGRES_PORT=$(or $(DB_PORT),5434) uv run pytest
+	  && POSTGRES_HOST=localhost POSTGRES_PORT=$$($(COMPOSE) port db 5432 | cut -d: -f2) uv run pytest
 	cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build
 	@echo "CI steps passed locally."
 
