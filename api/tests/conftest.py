@@ -15,11 +15,9 @@ SEED_DIR = API_DIR.parent / "seed"
 
 os.environ.setdefault("JWT_SECRET", "test-secret-test-secret-test-secret-0123456789")
 
-_server_url = make_url(
-    os.environ.get("TEST_DATABASE_URL")
-    or os.environ.get("DATABASE_URL")
-    or "postgresql+psycopg://desk:desk-local-dev@localhost:5434/desk"
-)
+from app.config import build_database_url  # noqa: E402  (import-light: no settings needed)
+
+_server_url = make_url(os.environ.get("TEST_DATABASE_URL") or build_database_url())
 _db_name = _server_url.database or "desk"
 if not _db_name.endswith("_test"):
     _db_name += "_test"

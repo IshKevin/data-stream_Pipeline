@@ -1,7 +1,11 @@
 name: data-stream_pipeline
 
 x-api-env: &api-env
-  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+  # The app assembles (and URL-escapes) the database URL from these parts.
+  POSTGRES_HOST: db
+  POSTGRES_USER: ${POSTGRES_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB}
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (copy .env.example)}
   JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -29,12 +33,12 @@ services:
     build:
       context: ./api
       target: runtime
+      additional_contexts:
+        seed: ./seed   # sample data is baked into the image (no host bind mount needed)
     command: ["sh", "bootstrap.sh"]
     environment:
       <<: *api-env
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
-    volumes:
-      - ./seed:/seed:ro
     depends_on:
       db:
         condition: service_healthy
@@ -44,6 +48,8 @@ services:
     build:
       context: ./api
       target: runtime
+      additional_contexts:
+        seed: ./seed
     environment: *api-env
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
@@ -68,11 +74,11 @@ services:
     build:
       context: ./api
       target: test
+      additional_contexts:
+        seed: ./seed
     environment:
       <<: *api-env
     command: ["pytest"]
-    volumes:
-      - ./seed:/seed:ro  # the import tests run against the real messy sample file
     depends_on:
       db:
         condition: service_healthy

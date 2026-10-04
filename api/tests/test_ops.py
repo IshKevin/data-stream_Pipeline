@@ -115,3 +115,22 @@ def test_event_broker_only_delivers_what_each_subscriber_may_see():
         return staff.queue.qsize(), owner.queue.qsize(), stranger.queue.qsize()
 
     assert asyncio.run(scenario()) == (1, 1, 0)
+
+
+def test_database_url_is_assembled_from_parts_with_escaping(monkeypatch):
+    """docker-compose passes POSTGRES_* parts; a password with URL-special characters must survive."""
+    from sqlalchemy.engine import make_url
+
+    from app.config import build_database_url
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("POSTGRES_USER", "desk")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss/w:rd#1%2f?x&y")
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_DB", "pipeline")
+    url = make_url(build_database_url())
+    assert (url.host, url.port, url.username, url.database) == ("db", 5432, "desk", "pipeline")
+    assert url.password == "p@ss/w:rd#1%2f?x&y"
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://explicit@host/db")
+    assert build_database_url() == "postgresql+psycopg://explicit@host/db"  # explicit URL wins
